@@ -16,17 +16,29 @@ class Alisha_Config_Endpoints
         register_rest_route('alisha/v1', '/app-config', array(
             'methods' => 'GET',
             'callback' => array(__CLASS__, 'get_config'),
-            'permission_callback' => '__return_true', // Open endpoint, secure using App ID header if needed later
+            'permission_callback' => array(__CLASS__, 'validate_request'),
         ));
+    }
+
+    public static function validate_request($request)
+    {
+        // Allow authenticated admins for debugging from WP dashboard.
+        if (current_user_can('manage_options')) {
+            return true;
+        }
+
+        $expected_app_id = apply_filters('alisha_expected_app_id', 'com.kloudboy.alisha');
+        $app_id = sanitize_text_field((string) $request->get_param('app_id'));
+
+        if (empty($app_id)) {
+            $app_id = sanitize_text_field((string) $request->get_header('X-Alisha-App-Id'));
+        }
+
+        return !empty($app_id) && hash_equals($expected_app_id, $app_id);
     }
 
     public static function get_config($request)
     {
-        $app_id = $request->get_param('app_id');
-
-        // Optional: Validate App ID if needed
-        // if ( 'com.kloudboy.alisha' !== $app_id ) ...
-
         $config = get_option('alisha_app_config', array());
 
         // Fill defaults if missing
@@ -45,12 +57,20 @@ class Alisha_Config_Endpoints
             'ads_enabled' => false,
             'force_update_version' => '1.0.0',
             'environment' => 'prod',
-            'force_update_version' => '1.0.0',
-            'environment' => 'prod',
             'drawer_menu_json' => '[]',
             'footer_menu_json' => '[]',
+            'drawer_menu_enabled' => true,
+            'footer_menu_enabled' => true,
         );
         $config = wp_parse_args($config, $defaults);
+        $drawer = json_decode(html_entity_decode((string) $config['drawer_menu_json']), true);
+        $footer = json_decode(html_entity_decode((string) $config['footer_menu_json']), true);
+        if (!is_array($drawer)) {
+            $drawer = array();
+        }
+        if (!is_array($footer)) {
+            $footer = array();
+        }
 
         // Ensure specific types
         $response_data = array(
@@ -74,10 +94,11 @@ class Alisha_Config_Endpoints
                 'force_update_version' => (string) $config['force_update_version'],
             ),
             'environment' => (string) $config['environment'],
-            'environment' => (string) $config['environment'],
             'menus' => array(
-                'drawer' => json_decode(html_entity_decode((string) $config['drawer_menu_json'])),
-                'footer' => json_decode(html_entity_decode((string) $config['footer_menu_json'])),
+                'drawer_enabled' => (bool) $config['drawer_menu_enabled'],
+                'drawer' => $drawer,
+                'footer_enabled' => (bool) $config['footer_menu_enabled'],
+                'footer' => $footer,
             ),
         );
 
